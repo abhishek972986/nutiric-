@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -42,7 +41,21 @@ function getErrorMessage(error: unknown, fallback: string) {
     }
   }
 
+  if (error && typeof error === 'object' && 'error' in error) {
+    const message = (error as { error?: string }).error
+    if (typeof message === 'string' && message.trim().length > 0) {
+      return message
+    }
+  }
+
   return fallback
+}
+
+function buildPublicImagePayload(imageData: string | null) {
+  if (!imageData) {
+    return undefined
+  }
+  return imageData.slice(0, 2000)
 }
 
 export default function ScanMealPage() {
@@ -67,7 +80,6 @@ export default function ScanMealPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
-  const supabase = createClient()
 
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -210,13 +222,6 @@ export default function ScanMealPage() {
 
     setIsSaving(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        toast.error('Please log in to save meals')
-        router.push('/auth/login')
-        return
-      }
-
       const normalizedItems = analysis.items
         .map((item) => ({
           ...item,
@@ -235,112 +240,30 @@ export default function ScanMealPage() {
         return
       }
 
-      // Create the meal log entry first.
-      const { data: meal, error: mealError } = await supabase
-        .from('meals')
-        .insert({
-          user_id: user.id,
-          meal_type: mealType,
-          total_calories: Math.round(analysis.total.calories),
-          total_protein: Math.round(analysis.total.protein * 10) / 10,
-          total_carbs: Math.round(analysis.total.carbs * 10) / 10,
-          total_fat: Math.round(analysis.total.fat * 10) / 10,
-        })
-        .select()
-        .single()
+      const response = await fetch('/api/meals', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mealType,
+          imageUrl: buildPublicImagePayload(image),
+          items: normalizedItems,
+        }),
+      })
 
-      if (mealError || !meal) {
-        const message = getErrorMessage(mealError, 'Failed to create meal log entry.')
+      const payload = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          toast.error('Please log in to save meals')
+          router.push('/auth/login')
+          return
+        }
+
+        const message = getErrorMessage(payload, 'Failed to save meal. Please try again.')
         toast.error(message)
         return
-      }
-
-      // Attach analyzed items to the newly created meal log entry.
-      const foodItems = normalizedItems.map((item) => ({
-        meal_id: meal.id,
-        user_id: user.id,
-        name: item.name,
-        quantity: item.quantity,
-        weight_grams: item.weight_grams,
-        calories: Math.round(item.calories),
-        protein: Math.round(item.protein * 10) / 10,
-        carbs: Math.round(item.carbs * 10) / 10,
-        fat: Math.round(item.fat * 10) / 10,
-      }))
-
-      const { error: itemsError } = await supabase
-        .from('food_items')
-        .insert(foodItems)
-
-      if (itemsError) {
-        // Prevent orphaned meal records if food items fail to save.
-        const { error: cleanupError } = await supabase.from('meals').delete().eq('id', meal.id)
-        if (cleanupError) {
-          console.error('Failed to clean up orphan meal:', cleanupError)
-        }
-
-        const message = getErrorMessage(itemsError, 'Failed to save food items for this meal.')
-        toast.error(message)
-        return
-      }
-
-      // Update streak
-      const today = new Date().toISOString().split('T')[0]
-      const { data: streak } = await supabase
-        .from('user_streaks')
-        .select('*')
-        .eq('user_id', user.id)
-        .single()
-
-      if (!streak) {
-        const { error: createStreakError } = await supabase.from('user_streaks').upsert({
-          user_id: user.id,
-          current_streak: 1,
-          longest_streak: 1,
-          last_log_date: today,
-          updated_at: new Date().toISOString(),
-        })
-
-        if (createStreakError) {
-          console.error('Failed to create streak row:', createStreakError)
-        }
-      } else {
-        const lastLog = streak.last_log_date
-        const yesterday = new Date()
-        yesterday.setDate(yesterday.getDate() - 1)
-        const yesterdayStr = yesterday.toISOString().split('T')[0]
-
-        let newStreak = streak.current_streak
-        if (lastLog === yesterdayStr) {
-          newStreak = streak.current_streak + 1
-        } else if (lastLog !== today) {
-          newStreak = 1
-        }
-
-        const { error: updateStreakError } = await supabase
-          .from('user_streaks')
-          .update({
-            current_streak: newStreak,
-            longest_streak: Math.max(newStreak, streak.longest_streak),
-            last_log_date: today,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', user.id)
-
-        if (updateStreakError) {
-          console.error('Failed to update streak:', updateStreakError)
-        }
-      }
-
-      // Update leaderboard score
-      try {
-        const scoreResponse = await fetch('/api/update-score', { method: 'POST' })
-        if (!scoreResponse.ok) {
-          const payload = await scoreResponse.json().catch(() => null)
-          console.error('Score update failed:', payload || scoreResponse.statusText)
-        }
-      } catch (scoreError) {
-        console.error('Score update request failed:', scoreError)
       }
 
       toast.success('Meal saved to log successfully!')

@@ -9,12 +9,12 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
-import { UserPlus, Check, X, Users, Search, Clock } from 'lucide-react'
+import { UserPlus, Check, X, Users, Search, Clock, UserMinus } from 'lucide-react'
 
 interface Friend {
   id: string
   full_name: string | null
-  email: string
+  email: string | null
   avatar_url: string | null
 }
 
@@ -24,7 +24,7 @@ interface FriendRequest {
   addressee_id: string
   status: string
   created_at: string
-  profile: Friend
+  profile: Friend | null
 }
 
 export default function FriendsPage() {
@@ -43,85 +43,24 @@ export default function FriendsPage() {
   }, [])
 
   async function loadFriendsData() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    setCurrentUserId(user.id)
+    try {
+      const response = await fetch('/api/friends')
+      const result = await response.json().catch(() => null)
 
-    // Get accepted friendships
-    const { data: friendships } = await supabase
-      .from('friendships')
-      .select('*')
-      .eq('status', 'accepted')
-      .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`)
-
-    if (friendships) {
-      const friendIds = friendships.map((f) =>
-        f.requester_id === user.id ? f.addressee_id : f.requester_id
-      )
-
-      if (friendIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name, email, avatar_url')
-          .in('id', friendIds)
-
-        setFriends(profiles || [])
+      if (!response.ok) {
+        toast.error(result?.error || 'Failed to load friends')
+        return
       }
+
+      setCurrentUserId(result.currentUserId || null)
+      setFriends(result.friends || [])
+      setPendingRequests(result.pendingRequests || [])
+      setSentRequests(result.sentRequests || [])
+    } catch {
+      toast.error('Failed to load friends data')
+    } finally {
+      setIsLoading(false)
     }
-
-    // Get pending requests (received)
-    const { data: pending } = await supabase
-      .from('friendships')
-      .select('*')
-      .eq('addressee_id', user.id)
-      .eq('status', 'pending')
-
-    if (pending && pending.length > 0) {
-      const requesterIds = pending.map((p) => p.requester_id)
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, avatar_url')
-        .in('id', requesterIds)
-
-      const requestsWithProfiles = pending.map((req) => ({
-        ...req,
-        profile: profiles?.find((p) => p.id === req.requester_id) || {
-          id: req.requester_id,
-          full_name: null,
-          email: '',
-          avatar_url: null,
-        },
-      }))
-      setPendingRequests(requestsWithProfiles)
-    }
-
-    // Get sent requests
-    const { data: sent } = await supabase
-      .from('friendships')
-      .select('*')
-      .eq('requester_id', user.id)
-      .eq('status', 'pending')
-
-    if (sent && sent.length > 0) {
-      const addresseeIds = sent.map((s) => s.addressee_id)
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, avatar_url')
-        .in('id', addresseeIds)
-
-      const requestsWithProfiles = sent.map((req) => ({
-        ...req,
-        profile: profiles?.find((p) => p.id === req.addressee_id) || {
-          id: req.addressee_id,
-          full_name: null,
-          email: '',
-          avatar_url: null,
-        },
-      }))
-      setSentRequests(requestsWithProfiles)
-    }
-
-    setIsLoading(false)
   }
 
   async function searchUser() {
@@ -171,42 +110,88 @@ export default function FriendsPage() {
   }
 
   async function sendFriendRequest(friendId: string) {
-    const { error } = await supabase
-      .from('friendships')
-      .insert({
-        requester_id: currentUserId,
-        addressee_id: friendId,
-        status: 'pending',
+    try {
+      const response = await fetch('/api/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send', friendId }),
       })
+      const result = await response.json().catch(() => null)
 
-    if (error) {
+      if (!response.ok) {
+        toast.error(result?.error || 'Failed to send friend request')
+      } else {
+        toast.success('Friend request sent!')
+        setSearchResult(null)
+        setSearchEmail('')
+        loadFriendsData()
+      }
+    } catch {
       toast.error('Failed to send friend request')
-    } else {
-      toast.success('Friend request sent!')
-      setSearchResult(null)
-      setSearchEmail('')
-      loadFriendsData()
     }
   }
 
   async function respondToRequest(requestId: string, accept: boolean) {
-    const { error } = await supabase
-      .from('friendships')
-      .update({
-        status: accept ? 'accepted' : 'rejected',
-        updated_at: new Date().toISOString(),
+    try {
+      const response = await fetch('/api/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'respond', requestId, accept }),
       })
-      .eq('id', requestId)
+      const result = await response.json().catch(() => null)
 
-    if (error) {
+      if (!response.ok) {
+        toast.error(result?.error || 'Failed to respond to request')
+      } else {
+        toast.success(accept ? 'Friend request accepted!' : 'Friend request declined')
+        loadFriendsData()
+      }
+    } catch {
       toast.error('Failed to respond to request')
-    } else {
-      toast.success(accept ? 'Friend request accepted!' : 'Friend request declined')
-      loadFriendsData()
     }
   }
 
-  const getInitials = (name: string | null, email: string) => {
+  async function cancelRequest(requestId: string) {
+    try {
+      const response = await fetch('/api/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', requestId }),
+      })
+      const result = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        toast.error(result?.error || 'Failed to cancel request')
+      } else {
+        toast.success('Friend request canceled')
+        loadFriendsData()
+      }
+    } catch {
+      toast.error('Failed to cancel request')
+    }
+  }
+
+  async function removeFriend(friendId: string) {
+    try {
+      const response = await fetch('/api/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', friendId }),
+      })
+      const result = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        toast.error(result?.error || 'Failed to remove friend')
+      } else {
+        toast.success('Friend removed')
+        loadFriendsData()
+      }
+    } catch {
+      toast.error('Failed to remove friend')
+    }
+  }
+
+  const getInitials = (name: string | null, email?: string | null) => {
     if (name) {
       return name
         .split(' ')
@@ -215,7 +200,15 @@ export default function FriendsPage() {
         .toUpperCase()
         .slice(0, 2)
     }
-    return email[0].toUpperCase()
+    return email?.[0]?.toUpperCase() || 'U'
+  }
+
+  const getDisplayEmail = (email?: string | null) => {
+    return email || 'No email available'
+  }
+
+  const getDisplayName = (name?: string | null) => {
+    return name || 'User'
   }
 
   if (isLoading) {
@@ -261,8 +254,8 @@ export default function FriendsPage() {
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="font-medium text-foreground">{searchResult.full_name || 'User'}</p>
-                  <p className="text-xs text-muted-foreground">{searchResult.email}</p>
+                  <p className="font-medium text-foreground">{getDisplayName(searchResult.full_name)}</p>
+                  <p className="text-xs text-muted-foreground">{getDisplayEmail(searchResult.email)}</p>
                 </div>
               </div>
               <Button size="sm" onClick={() => sendFriendRequest(searchResult.id)}>
@@ -308,10 +301,14 @@ export default function FriendsPage() {
                           {getInitials(friend.full_name, friend.email)}
                         </AvatarFallback>
                       </Avatar>
-                      <div>
-                        <p className="font-medium text-foreground">{friend.full_name || 'User'}</p>
-                        <p className="text-xs text-muted-foreground">{friend.email}</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate">{getDisplayName(friend.full_name)}</p>
+                        <p className="text-xs text-muted-foreground truncate">{getDisplayEmail(friend.email)}</p>
                       </div>
+                      <Button size="sm" variant="outline" onClick={() => removeFriend(friend.id)}>
+                        <UserMinus className="h-4 w-4 mr-1" />
+                        Remove
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -334,16 +331,16 @@ export default function FriendsPage() {
                 <div className="space-y-3">
                   {pendingRequests.map((request) => (
                     <div key={request.id} className="flex items-center justify-between p-3 bg-secondary rounded-lg">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <Avatar>
-                          <AvatarImage src={request.profile.avatar_url || undefined} />
+                          <AvatarImage src={request.profile?.avatar_url || undefined} />
                           <AvatarFallback className="bg-primary/10 text-primary">
-                            {getInitials(request.profile.full_name, request.profile.email)}
+                            {getInitials(request.profile?.full_name || null, request.profile?.email)}
                           </AvatarFallback>
                         </Avatar>
-                        <div>
-                          <p className="font-medium text-foreground">{request.profile.full_name || 'User'}</p>
-                          <p className="text-xs text-muted-foreground">{request.profile.email}</p>
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground truncate">{getDisplayName(request.profile?.full_name)}</p>
+                          <p className="text-xs text-muted-foreground truncate">{getDisplayEmail(request.profile?.email)}</p>
                         </div>
                       </div>
                       <div className="flex gap-2">
@@ -377,18 +374,18 @@ export default function FriendsPage() {
                   {sentRequests.map((request) => (
                     <div key={request.id} className="flex items-center gap-3 p-3 bg-secondary rounded-lg">
                       <Avatar>
-                        <AvatarImage src={request.profile.avatar_url || undefined} />
+                        <AvatarImage src={request.profile?.avatar_url || undefined} />
                         <AvatarFallback className="bg-primary/10 text-primary">
-                          {getInitials(request.profile.full_name, request.profile.email)}
+                          {getInitials(request.profile?.full_name || null, request.profile?.email)}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="flex-1">
-                        <p className="font-medium text-foreground">{request.profile.full_name || 'User'}</p>
-                        <p className="text-xs text-muted-foreground">{request.profile.email}</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate">{getDisplayName(request.profile?.full_name)}</p>
+                        <p className="text-xs text-muted-foreground truncate">{getDisplayEmail(request.profile?.email)}</p>
                       </div>
-                      <span className="text-xs text-muted-foreground px-2 py-1 bg-muted rounded-full">
-                        Pending
-                      </span>
+                      <Button size="sm" variant="outline" onClick={() => cancelRequest(request.id)}>
+                        Cancel
+                      </Button>
                     </div>
                   ))}
                 </div>
