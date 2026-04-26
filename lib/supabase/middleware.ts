@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { hasSupabaseEnv } from './noop-client'
 
 export async function updateSession(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -39,15 +41,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Protected routes - redirect to login if not authenticated
-  if (
-    (request.nextUrl.pathname.startsWith('/dashboard') ||
-      request.nextUrl.pathname.startsWith('/profile') ||
-      request.nextUrl.pathname.startsWith('/friends') ||
-      request.nextUrl.pathname.startsWith('/leaderboard') ||
-      request.nextUrl.pathname.startsWith('/meals') ||
-      request.nextUrl.pathname.startsWith('/calculator')) &&
-    !user
-  ) {
+  if (pathname.startsWith('/dashboard') && !user) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     return NextResponse.redirect(url)
@@ -55,8 +49,7 @@ export async function updateSession(request: NextRequest) {
 
   // Redirect authenticated users away from auth pages
   if (
-    (request.nextUrl.pathname.startsWith('/auth/login') ||
-      request.nextUrl.pathname.startsWith('/auth/sign-up')) &&
+    (pathname.startsWith('/auth/login') || pathname.startsWith('/auth/sign-up')) &&
     user
   ) {
     const url = request.nextUrl.clone()

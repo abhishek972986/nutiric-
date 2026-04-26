@@ -8,31 +8,37 @@ import { StreakCard } from '@/components/dashboard/streak-card'
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    return null
+  }
   
   // Get profile data
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user?.id)
-    .single()
-
-  // Get today's meals
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  
-  const { data: meals } = await supabase
-    .from('meals')
-    .select('*, food_items(*)')
-    .eq('user_id', user?.id)
-    .gte('created_at', today.toISOString())
-    .order('created_at', { ascending: true })
 
-  // Get streak data
-  const { data: streakData } = await supabase
-    .from('user_streaks')
-    .select('*')
-    .eq('user_id', user?.id)
-    .single()
+  const [profileResult, mealsResult, streakResult] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single(),
+    supabase
+      .from('meals')
+      .select('*, food_items(*)')
+      .eq('user_id', user.id)
+      .gte('created_at', today.toISOString())
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('user_streaks')
+      .select('*')
+      .eq('user_id', user.id)
+      .single(),
+  ])
+
+  const profile = profileResult.data
+  const meals = mealsResult.data
+  const streakData = streakResult.data
 
   // Calculate totals
   const totals = meals?.reduce((acc, meal) => ({

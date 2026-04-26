@@ -31,26 +31,33 @@ export default async function HistoryPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Get profile for calorie goal
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('daily_calorie_goal')
-    .eq('id', user?.id)
-    .single()
-
-  const calorieGoal = profile?.daily_calorie_goal || 2000
+  if (!user) {
+    return null
+  }
 
   // Get meals from last 7 days
   const endDate = new Date()
   const startDate = subDays(endDate, 6)
 
-  const { data: meals } = await supabase
-    .from('meals')
-    .select('*, food_items(name)')
-    .eq('user_id', user?.id)
-    .gte('created_at', startOfDay(startDate).toISOString())
-    .lte('created_at', endOfDay(endDate).toISOString())
-    .order('created_at', { ascending: false })
+  const [profileResult, mealsResult] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('daily_calorie_goal')
+      .eq('id', user.id)
+      .single(),
+    supabase
+      .from('meals')
+      .select('*, food_items(name)')
+      .eq('user_id', user.id)
+      .gte('created_at', startOfDay(startDate).toISOString())
+      .lte('created_at', endOfDay(endDate).toISOString())
+      .order('created_at', { ascending: false }),
+  ])
+
+  const profile = profileResult.data
+  const meals = mealsResult.data
+
+  const calorieGoal = profile?.daily_calorie_goal || 2000
 
   // Group meals by day
   const dayDataMap = new Map<string, DayData>()
