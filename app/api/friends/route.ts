@@ -76,8 +76,15 @@ export async function GET() {
     const friends =
       accepted?.map((row) => {
         const friendId = row.requester_id === user.id ? row.addressee_id : row.requester_id
-        return profileMap.get(friendId)
-      }).filter(Boolean) || []
+        return (
+          profileMap.get(friendId) || {
+            id: friendId,
+            full_name: null,
+            email: null,
+            avatar_url: null,
+          }
+        )
+      }) || []
 
     const pendingRequests =
       pendingReceived?.map((row) => ({

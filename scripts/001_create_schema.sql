@@ -24,6 +24,12 @@ CREATE POLICY "profiles_insert_own" ON public.profiles FOR INSERT WITH CHECK (au
 CREATE POLICY "profiles_update_own" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "profiles_delete_own" ON public.profiles FOR DELETE USING (auth.uid() = id);
 
+-- Social features (leaderboard/friends) need read access to profile display info.
+DROP POLICY IF EXISTS "profiles_select_authenticated" ON public.profiles;
+CREATE POLICY "profiles_select_authenticated" ON public.profiles FOR SELECT
+TO authenticated
+USING (true);
+
 -- Meals table
 CREATE TABLE IF NOT EXISTS public.meals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,6 +49,22 @@ CREATE POLICY "meals_select_own" ON public.meals FOR SELECT USING (auth.uid() = 
 CREATE POLICY "meals_insert_own" ON public.meals FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "meals_update_own" ON public.meals FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "meals_delete_own" ON public.meals FOR DELETE USING (auth.uid() = user_id);
+
+-- Users can read accepted friends' meals for social features
+DROP POLICY IF EXISTS "meals_select_friends" ON public.meals;
+CREATE POLICY "meals_select_friends" ON public.meals FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.friendships f
+    WHERE f.status = 'accepted'
+      AND (
+        (f.requester_id = auth.uid() AND f.addressee_id = meals.user_id)
+        OR
+        (f.addressee_id = auth.uid() AND f.requester_id = meals.user_id)
+      )
+  )
+);
 
 -- Food items table (individual items in a meal)
 CREATE TABLE IF NOT EXISTS public.food_items (
@@ -65,6 +87,22 @@ CREATE POLICY "food_items_select_own" ON public.food_items FOR SELECT USING (aut
 CREATE POLICY "food_items_insert_own" ON public.food_items FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "food_items_update_own" ON public.food_items FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "food_items_delete_own" ON public.food_items FOR DELETE USING (auth.uid() = user_id);
+
+-- Users can read accepted friends' meal item details for social features
+DROP POLICY IF EXISTS "food_items_select_friends" ON public.food_items;
+CREATE POLICY "food_items_select_friends" ON public.food_items FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.friendships f
+    WHERE f.status = 'accepted'
+      AND (
+        (f.requester_id = auth.uid() AND f.addressee_id = food_items.user_id)
+        OR
+        (f.addressee_id = auth.uid() AND f.requester_id = food_items.user_id)
+      )
+  )
+);
 
 -- Friendships table
 CREATE TABLE IF NOT EXISTS public.friendships (
