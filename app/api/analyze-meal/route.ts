@@ -19,6 +19,11 @@ const geminiResponseSchema = z.object({
 
 type FoodItem = z.infer<typeof foodItemSchema>
 
+const analyzeBodySchema = z.union([
+  z.object({ image: z.string().min(1) }),
+  z.object({ foodName: z.string().min(1), quantity: z.string().min(1) }),
+])
+
 function extractImageParts(imageDataUrl: string) {
   const match = imageDataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)
   if (!match) {
@@ -91,15 +96,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { image } = (await request.json()) as { image?: string }
-
-    if (!image) {
-      return NextResponse.json({ error: 'No image provided' }, { status: 400 })
+    const bodyParse = analyzeBodySchema.safeParse(await request.json())
+    if (!bodyParse.success) {
+      return NextResponse.json({ error: 'Invalid request payload' }, { status: 400 })
     }
 
-    const imageParts = extractImageParts(image)
-    if (!imageParts) {
-      return NextResponse.json({ error: 'Invalid image format' }, { status: 400 })
+    const requestBody = bodyParse.data
+    const image = 'image' in requestBody ? requestBody.image : null
+
+    let imageParts: ReturnType<typeof extractImageParts> = null
+    if (image) {
+      imageParts = extractImageParts(image)
+      if (!imageParts) {
+        return NextResponse.json({ error: 'Invalid image format' }, { status: 400 })
+      }
     }
 
     const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY
@@ -119,17 +129,31 @@ export async function POST(request: Request) {
       'gemini-2.0-flash',
     ].filter((model, index, arr): model is string => Boolean(model) && arr.indexOf(model) === index)
 
-    const prompt = [
-      'You are a nutrition analysis assistant.',
-      'Analyze this meal image and estimate nutrition for each visible food item.',
-      'Return ONLY valid JSON with this exact shape and numeric values:',
-      '{"items":[{"name":"string","quantity":"string","weight_grams":0,"calories":0,"protein":0,"carbs":0,"fat":0}]}',
-      'Rules:',
-      '- Include all clearly visible foods and drinks.',
-      '- Use realistic serving sizes and nutrition estimates.',
-      '- If unsure, provide best estimate rather than empty response.',
-      '- Do not include markdown or explanation.',
-    ].join('\n')
+    const prompt = image
+      ? [
+          'You are a nutrition analysis assistant.',
+          'Analyze this meal image and estimate nutrition for each visible food item.',
+          'Return ONLY valid JSON with this exact shape and numeric values:',
+          '{"items":[{"name":"string","quantity":"string","weight_grams":0,"calories":0,"protein":0,"carbs":0,"fat":0}]}',
+          'Rules:',
+          '- Include all clearly visible foods and drinks.',
+          '- Use realistic serving sizes and nutrition estimates.',
+          '- If unsure, provide best estimate rather than empty response.',
+          '- Do not include markdown or explanation.',
+        ].join('\n')
+      : [
+          'You are a nutrition analysis assistant.',
+          'Estimate nutrition for exactly one food item from text input.',
+          `Food name: ${requestBody.foodName}`,
+          `Quantity: ${requestBody.quantity}`,
+          'Return ONLY valid JSON with this exact shape and numeric values:',
+          '{"items":[{"name":"string","quantity":"string","weight_grams":0,"calories":0,"protein":0,"carbs":0,"fat":0}]}',
+          'Rules:',
+          '- Return exactly one item in the items array.',
+          '- Use realistic nutrition estimates for the given quantity.',
+          '- Keep quantity aligned with the user text.',
+          '- Do not include markdown or explanation.',
+        ].join('\n')
 
     const genAI = new GoogleGenerativeAI(geminiApiKey)
     let rawText = ''
@@ -138,19 +162,22 @@ export async function POST(request: Request) {
     for (const modelName of modelCandidates) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName })
+        const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = []
+        if (imageParts) {
+          parts.push({
+            inlineData: {
+              data: imageParts.base64Data,
+              mimeType: imageParts.mimeType,
+            },
+          })
+        }
+        parts.push({ text: prompt })
+
         const result = await model.generateContent({
           contents: [
             {
               role: 'user',
-              parts: [
-                {
-                  inlineData: {
-                    data: imageParts.base64Data,
-                    mimeType: imageParts.mimeType,
-                  },
-                },
-                { text: prompt },
-              ],
+              parts,
             },
           ],
           generationConfig: {

@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
-import { Camera, ImageIcon, X, Check, Edit2, Trash2, Plus, ArrowLeft, Utensils, Zap, Info } from 'lucide-react'
+import { Camera, ImageIcon, X, Check, Edit2, Trash2, Plus, ArrowLeft, Utensils, Zap } from 'lucide-react'
 
 interface FoodItem {
   name: string
@@ -67,14 +67,10 @@ export default function ScanMealPage() {
   const [editValues, setEditValues] = useState<Partial<FoodItem>>({})
   const [isSaving, setIsSaving] = useState(false)
   const [isAddingManual, setIsAddingManual] = useState(false)
+  const [isEstimatingManual, setIsEstimatingManual] = useState(false)
   const [manualItem, setManualItem] = useState<Partial<FoodItem>>({
     name: '',
     quantity: '1 serving',
-    weight_grams: 100,
-    calories: 0,
-    protein: 0,
-    carbs: 0,
-    fat: 0,
   })
   
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -168,38 +164,56 @@ export default function ScanMealPage() {
     setAnalysis({ items: newItems, total })
   }
 
-  const addManualItem = () => {
-    if (!manualItem.name || !manualItem.calories) {
-      toast.error('Please enter at least a name and calories')
+  const addManualItem = async () => {
+    const foodName = manualItem.name?.trim()
+    const quantity = manualItem.quantity?.trim() || '1 serving'
+
+    if (!foodName) {
+      toast.error('Please enter a food name')
       return
     }
-    
-    const newItem: FoodItem = {
-      name: manualItem.name || '',
-      quantity: manualItem.quantity || '1 serving',
-      weight_grams: manualItem.weight_grams || 100,
-      calories: manualItem.calories || 0,
-      protein: manualItem.protein || 0,
-      carbs: manualItem.carbs || 0,
-      fat: manualItem.fat || 0,
+
+    setIsEstimatingManual(true)
+    try {
+      const response = await fetch('/api/analyze-meal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          foodName,
+          quantity,
+        }),
+      })
+
+      const payload = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        const message = getErrorMessage(payload, 'Failed to estimate nutrition for this item')
+        toast.error(message)
+        return
+      }
+
+      const estimatedItem = payload?.items?.[0] as FoodItem | undefined
+      if (!estimatedItem) {
+        toast.error('Could not estimate nutrition for this item')
+        return
+      }
+
+      const currentItems = analysis?.items || []
+      const newItems = [...currentItems, estimatedItem]
+      const total = calculateTotals(newItems)
+
+      setAnalysis({ items: newItems, total })
+      setIsAddingManual(false)
+      setManualItem({
+        name: '',
+        quantity: '1 serving',
+      })
+      toast.success('Food item added with auto nutrition!')
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to estimate nutrition for this item'))
+    } finally {
+      setIsEstimatingManual(false)
     }
-    
-    const currentItems = analysis?.items || []
-    const newItems = [...currentItems, newItem]
-    const total = calculateTotals(newItems)
-    
-    setAnalysis({ items: newItems, total })
-    setIsAddingManual(false)
-    setManualItem({
-      name: '',
-      quantity: '1 serving',
-      weight_grams: 100,
-      calories: 0,
-      protein: 0,
-      carbs: 0,
-      fat: 0,
-    })
-    toast.success('Food item added!')
   }
 
   const calculateTotals = (items: FoodItem[]) => {
@@ -480,40 +494,26 @@ export default function ScanMealPage() {
                       value={manualItem.name}
                       onChange={(e) => setManualItem(prev => ({ ...prev, name: e.target.value }))}
                     />
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
-                        placeholder="Calories"
-                        value={manualItem.calories || ''}
-                        onChange={(e) => setManualItem(prev => ({ ...prev, calories: Number(e.target.value) }))}
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Protein (g)"
-                        value={manualItem.protein || ''}
-                        onChange={(e) => setManualItem(prev => ({ ...prev, protein: Number(e.target.value) }))}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
-                        placeholder="Carbs (g)"
-                        value={manualItem.carbs || ''}
-                        onChange={(e) => setManualItem(prev => ({ ...prev, carbs: Number(e.target.value) }))}
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Fat (g)"
-                        value={manualItem.fat || ''}
-                        onChange={(e) => setManualItem(prev => ({ ...prev, fat: Number(e.target.value) }))}
-                      />
-                    </div>
+                    <Input
+                      placeholder="Quantity (e.g., 1 bowl, 200g, 2 slices)"
+                      value={manualItem.quantity || ''}
+                      onChange={(e) => setManualItem(prev => ({ ...prev, quantity: e.target.value }))}
+                    />
                     <div className="flex gap-2">
-                      <Button size="sm" onClick={addManualItem} className="flex-1">
-                        <Check className="h-4 w-4 mr-1" />
-                        Add Item
+                      <Button size="sm" onClick={addManualItem} className="flex-1" disabled={isEstimatingManual}>
+                        {isEstimatingManual ? (
+                          <>
+                            <Spinner className="h-4 w-4 mr-1" />
+                            Calculating...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="h-4 w-4 mr-1" />
+                            Auto Calculate & Add
+                          </>
+                        )}
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => setIsAddingManual(false)}>
+                      <Button size="sm" variant="outline" onClick={() => setIsAddingManual(false)} disabled={isEstimatingManual}>
                         Cancel
                       </Button>
                     </div>
