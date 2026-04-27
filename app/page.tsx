@@ -108,22 +108,7 @@ export default function LandingPage() {
       </section>
 
       {/* Stats Section */}
-      <section className="py-12 px-4 bg-card border-y border-border">
-        <div className="max-w-4xl mx-auto grid grid-cols-3 gap-8 text-center">
-          <div>
-            <div className="text-3xl md:text-4xl font-bold text-primary">10K+</div>
-            <div className="text-sm text-muted-foreground mt-1">Active Users</div>
-          </div>
-          <div>
-            <div className="text-3xl md:text-4xl font-bold text-primary">500K+</div>
-            <div className="text-sm text-muted-foreground mt-1">Meals Tracked</div>
-          </div>
-          <div>
-            <div className="text-3xl md:text-4xl font-bold text-primary">98%</div>
-            <div className="text-sm text-muted-foreground mt-1">AI Accuracy</div>
-          </div>
-        </div>
-      </section>
+     
 
       {/* Features Section */}
       <section id="features" className="py-20 px-4">
