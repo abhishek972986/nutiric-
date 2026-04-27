@@ -323,16 +323,7 @@ export default function ScanMealPage() {
             <Card className="border-0 shadow-lg overflow-hidden">
               <CardContent className="p-0">
                 <div className="grid grid-cols-2 divide-x divide-border">
-                  <button
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="flex flex-col items-center justify-center p-8 hover:bg-secondary/50 transition-colors"
-                  >
-                    <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-3">
-                      <Camera className="h-8 w-8 text-primary" />
-                    </div>
-                    <span className="font-medium text-foreground">Take Photo</span>
-                    <span className="text-xs text-muted-foreground mt-1">Use camera</span>
-                  </button>
+                 
                   
                   <button
                     onClick={() => fileInputRef.current?.click()}
