@@ -322,7 +322,7 @@ export default function ScanMealPage() {
             {/* Upload Options */}
             <Card className="border-0 shadow-lg overflow-hidden">
               <CardContent className="p-0">
-                <div className="grid grid-cols-2 divide-x divide-border">
+                <div className="grid justify-center  divide-x divide-border">
                  
                   
                   <button
